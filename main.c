@@ -58,9 +58,9 @@ int main(void)
   uint32_t status;
   uint16_t init_sequence[] = {0x3a, 0x0d, I2C_RESTART, 0x3b, I2C_READ};
   uint8_t device_id = 0;		/* will contain the device id after sequence has been processed */
-  
+
   enable_irq(INT_I2C0 - 16);
-	
+
   SIM_SCGC4 |= SIM_SCGC4_I2C0_MASK;
   SIM_SCGC5 |= SIM_SCGC5_PORTB_MASK;
 
@@ -68,12 +68,13 @@ int main(void)
   PORTB_PCR1 = PORT_PCR_MUX(0x02) | PORT_PCR_ODE_MASK;
 
   status = i2c_init(0, 0x01, 0x20);
-	
   status = i2c_send_sequence(0, init_sequence, 5, &device_id, my_callback, (void*)0x1234);
-	
-  for(;;) {	   
+  
+  /* This endless loop is here so that you can check the result of the I2C transmission. It is performed asynchronously,
+	 so without the loop the program would terminate before the transmission ended. */
+  for(;;) {
 	counter++;
   }
-	
+
   return 0;
 }

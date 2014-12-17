@@ -81,7 +81,7 @@ uint32_t i2c_init(uint8_t i2c_number, uint8_t mult, uint8_t icr);
 
   callback_fn is a pointer to a function that will get called upon successful completion of the entire sequence. If 0 is
   supplied, no function will be called. Note that the function will be called fron an interrupt handler, so it should do
-  the absolute minimum possible (such as enqueue an event to be processed later, set a flag, exit sleep mode, etc.
+  the absolute minimum possible (such as enqueue an event to be processed later, set a flag, exit sleep mode, etc.)
 
   user_data is a pointer that will be passed to the callback_fn.
 */
