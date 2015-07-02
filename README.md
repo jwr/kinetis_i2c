@@ -42,9 +42,6 @@ Here's an example of performing a write and then a read with repeated start (res
   uint32_t status;
   uint16_t init_sequence[] = {0x3a, 0x0d, I2C_RESTART, 0x3b, I2C_READ};
   uint8_t device_id = 0;		/* will contain the device id after sequence has been processed */
-  uint32_t status;
-  uint16_t init_sequence[] = {0x3a, 0x0d, I2C_RESTART, 0x3b, I2C_READ};
-  uint8_t device_id = 0;		/* will contain the device id after sequence has been processed */
   
   enable_irq(INT_I2C0 - 16);
 	
