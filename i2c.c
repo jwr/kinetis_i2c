@@ -168,7 +168,7 @@ void i2c_isr(void) {
 		break;
 
 	  case 1:
-		I2C_C1_REG(i2c_base_ptr) |= ~I2C_C1_TXAK_MASK; /* do not ACK the final read */
+		I2C_C1_REG(i2c_base_ptr) |= I2C_C1_TXAK_MASK; /* do not ACK the final read */
 		*channel->received_data++ = I2C_D_REG(i2c_base_ptr);
 		break;
 
@@ -216,6 +216,8 @@ void i2c_isr(void) {
 
 		  if(channel->reads_ahead == 1) {
 			I2C_C1_REG(i2c_base_ptr) |= I2C_C1_TXAK_MASK; /* do not ACK the final read */
+		  else {
+			I2C_C1_REG(i2c_base_ptr) &= ~(I2C_C1_TXAK_MASK);  /* ACK all but the final read */
 		  }
 		  /* Dummy read comes first, note that this is not valid data! This only triggers a read, actual data will come
 			 in the next interrupt call and overwrite this. This is why we do not increment the received_data
