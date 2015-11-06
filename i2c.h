@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2014 Jan Rychter
+  Copyright (C) 2014, 2015 Jan Rychter
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 #define I2C_H
 
 #include <stdint.h>
-#include "derivative.h"
 
 /* Most Kinetis devices have only one I2C module, but for those that have more, set the number of devices here. */
 #define I2C_NUMBER_OF_DEVICES 1
@@ -87,9 +86,6 @@ uint32_t i2c_init(uint8_t i2c_number, uint8_t mult, uint8_t icr);
 */
 int32_t i2c_send_sequence(uint32_t channel_number, uint16_t *sequence, uint32_t sequence_length, uint8_t *received_data,
 						  void (*callback_fn)(void*), void *user_data);
-
-/* Set all I2C interrupt handlers to this function. */
-void i2c_isr(void);
 
 #define I2C_RESTART 1<<8
 #define I2C_READ    2<<8
