@@ -137,7 +137,7 @@ void I2C0_IRQHandler(void) {
 
 		  /* Issue 6070: I2C: Repeat start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. */
 #ifdef ERRATA_1N96F_WORKAROUND
-		  f_register = i2c->F(i2c_ptr);
+		  f_register = i2c->F;
 		  i2c->F = (f_register & 0x3f); /* Zero out the MULT bits (topmost 2 bits). */
 #endif
 
@@ -186,7 +186,19 @@ void I2C0_IRQHandler(void) {
 
 	  if(element == I2C_RESTART) {
 		/* Do we have a restart? If so, generate repeated start and make sure TX is on. */
-		i2c->C1 |= I2C_C1_RSTA_MASK | I2C_C1_TX_MASK;
+
+		/* Issue 6070: I2C: Repeat start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. */
+#ifdef ERRATA_1N96F_WORKAROUND
+		f_register = i2c->F;
+		i2c->F = (f_register & 0x3f); /* Zero out the MULT bits (topmost 2 bits). */
+#endif
+
+		i2c->C1 |= I2C_C1_RSTA_MASK | I2C_C1_TX_MASK; /* Generate a repeated start condition and switch to TX. */
+
+#ifdef ERRATA_1N96F_WORKAROUND
+		i2c->F = f_register;
+#endif
+
 		/* A restart is processed immediately, so we need to get a new element from our sequence. This is safe, because a
 		   sequence cannot end with a RESTART: there has to be something after it. */
 		channel->sequence++;
