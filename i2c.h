@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2014, 2015 Jan Rychter
+  Copyright (C) 2014-2017 Jan Rychter
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,18 @@
 #define I2C_H
 
 #include <stdint.h>
+#include "fsl_device_registers.h"
 
-/* Most Kinetis devices have only one I2C module, but for those that have more, set the number of devices here. */
-#define I2C_NUMBER_OF_DEVICES 1
+/* Most Kinetis devices have only one I2C module, but for those that have more, set the number of devices here. With
+   modern KSDK the following definition should work, but if not, set the number here manually. */
+#define I2C_NUMBER_OF_DEVICES FSL_FEATURE_SOC_I2C_COUNT
 
 /* Define this if you have a Kinetis L device with the 1N96F mask. It enables a workaround for issue 6070: I2C: Repeat
-   start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. */
-#undef ERRATA_1N96F_WORKAROUND
+   start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. With older KSDK include files, you
+   might need to set this manually. */
+#if defined(FSL_FEATURE_I2C_HAS_ERRATA_6070) && (FSL_FEATURE_I2C_HAS_ERRATA_6070 == 1)
+#define ERRATA_1N96F_WORKAROUND
+#endif
 
 /* Channel status definitions. These are not enumerated, as I want them to be uint8_t. */
 #define I2C_AVAILABLE 0
@@ -62,7 +67,6 @@ extern volatile I2C_Channel i2c_channels[I2C_NUMBER_OF_DEVICES];
   selected and the pins are set to open drain.
 */
 uint32_t i2c_init(uint8_t i2c_number, uint8_t mult, uint8_t icr);
-
 
 /*
   Sends a command/data sequence that can include restarts, writes and reads. Every transmission begins with a START,

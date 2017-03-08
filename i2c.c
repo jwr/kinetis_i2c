@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2014, 2015 Jan Rychter
+  Copyright (C) 2014-2017 Jan Rychter
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -21,21 +21,22 @@
 */
 
 #include <stdint.h>
-/* The derivative.h header should include the CMSIS peripheral definitions include file for your device,
-   e.g. MK20D5.h or similar. Be careful, because the older non-CMSIS-compliant headers have identical names. The
-   description should read "CMSIS Peripheral Access Layer for [your device name]". */
-#include "derivative.h"
+#include "fsl_device_registers.h"
 #include "i2c.h"
 
 volatile I2C_Channel i2c_channels[I2C_NUMBER_OF_DEVICES];
-static I2C_Type* i2c_base_ptrs[] = I2C_BASES;
+static I2C_Type* i2c_base_ptrs[] = I2C_BASE_ADDRS;
 
 uint32_t i2c_init(uint8_t i2c_number, uint8_t mult, uint8_t icr) {
   I2C_Type* i2c = i2c_base_ptrs[i2c_number];
+  uint32_t i2c_irqs[] = I2C_IRQS;
+
   i2c->C1 = 0;
   i2c->C1 |= I2C_C1_IICEN_MASK;
   i2c->F &= ~0xf;
   i2c->F |= ((mult << I2C_F_MULT_SHIFT) | icr);
+  NVIC_EnableIRQ(i2c_irqs[i2c_number]);
+
   return i2c_number;
 }
 
@@ -87,11 +88,9 @@ int32_t i2c_send_sequence(uint32_t channel_number, uint16_t *sequence, uint32_t 
   return result;
 }
 
-
-void I2C0_IRQHandler(void) {
-  volatile I2C_Channel* channel;
-  I2C_Type* i2c;
-  uint8_t channel_number;
+void i2c_irq_handler(uint32_t channel_number) {
+  volatile I2C_Channel* channel = &i2c_channels[channel_number];;
+  I2C_Type* i2c = (I2C_Type*)i2c_base_ptrs[channel_number];;
   uint16_t element;
   uint8_t status;
 
@@ -99,93 +98,39 @@ void I2C0_IRQHandler(void) {
   uint8_t f_register;
 #endif
 
-  /* Loop over I2C modules. For the most common use case where I2C_NUMBER_OF_DEVICES == 1, the compiler should optimize
-	 this loop out entirely. */
-  for(channel_number = 0; channel_number < I2C_NUMBER_OF_DEVICES; channel_number++) {
-	channel = &i2c_channels[channel_number];
-	i2c = (I2C_Type*)i2c_base_ptrs[channel_number];
-
-	status = i2c->S;
-
-	/* Was the interrupt request from the current I2C module? */
-	if(!(status & I2C_S_IICIF_MASK)) {
-	  continue;                 /* If not, proceed to the next I2C module. */
-	}
-
-	i2c->S |= I2C_S_IICIF_MASK; /* Acknowledge the interrupt request. */
-
-	if(status & I2C_S_ARBL_MASK) {
-	  i2c->S |= I2C_S_ARBL_MASK;
-	  goto i2c_isr_error;
-	}
-
-	if(channel->txrx == I2C_READING) {
-
-	  switch(channel->reads_ahead) {
-	  case 0:
-		/* All the reads in the sequence have been processed (but note that the final data register read still needs to
-		   be done below! Now, the next thing is either a restart or the end of a sequence. In any case, we need to
-		   switch to TX mode, either to generate a repeated start condition, or to avoid triggering another I2C read
-		   when reading the contents of the data register. */
-		i2c->C1 |= I2C_C1_TX_MASK;
-
-		/* Perform the final data register read now that it's safe to do so. */
-		*channel->received_data++ = i2c->D;
-
-		/* Do we have a repeated start? */
-		if((channel->sequence < channel->sequence_end) && (*channel->sequence == I2C_RESTART)) {
-
-		  /* Issue 6070: I2C: Repeat start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. */
-#ifdef ERRATA_1N96F_WORKAROUND
-		  f_register = i2c->F;
-		  i2c->F = (f_register & 0x3f); /* Zero out the MULT bits (topmost 2 bits). */
+#if defined(FSL_FEATURE_I2C_HAS_DOUBLE_BUFFERING) && (FSL_FEATURE_I2C_HAS_DOUBLE_BUFFERING == 1) /* The new double-buffered I2C. */
+  volatile uint32_t delay_counter;
 #endif
 
-		  i2c->C1 |= I2C_C1_RSTA_MASK; /* Generate a repeated start condition. */
+  status = i2c->S;
 
-#ifdef ERRATA_1N96F_WORKAROUND
-		  i2c->F = f_register;
-#endif
-		  /* A restart is processed immediately, so we need to get a new element from our sequence. This is safe, because
-			 a sequence cannot end with a RESTART: there has to be something after it. Note that the only thing that can
-			 come after a restart is an address write. */
-		  channel->txrx = I2C_WRITING;
-		  channel->sequence++;
-		  element = *channel->sequence;
-		  i2c->D = element;
-		} else {
-		  goto i2c_isr_stop;
-		}
-		break;
+  /* Was the interrupt request from the current I2C module? */
+  if(!(status & I2C_S_IICIF_MASK)) {
+	return;						/* This should never happen, but... */
+  }
 
-	  case 1:
-		i2c->C1 |= I2C_C1_TXAK_MASK; /* do not ACK the final read */
-		*channel->received_data++ = i2c->D;
-		break;
+  i2c->S |= I2C_S_IICIF_MASK;	/* Acknowledge the interrupt request. */
 
-	  default:
-		*channel->received_data++ = i2c->D;
-		break;
-	  }
+  if(status & I2C_S_ARBL_MASK) {
+	i2c->S |= I2C_S_ARBL_MASK;
+	goto i2c_isr_error;
+  }
 
-	  channel->reads_ahead--;
+  if(channel->txrx == I2C_READING) {
 
-	} else {                    /* channel->txrx == I2C_WRITING */
-	  /* First, check if we are at the end of a sequence. */
-	  if(channel->sequence == channel->sequence_end) {
-		goto i2c_isr_stop;
-	  }
+	switch(channel->reads_ahead) {
+	case 0:
+	  /* All the reads in the sequence have been processed (but note that the final data register read still needs to
+		 be done below! Now, the next thing is either a restart or the end of a sequence. In any case, we need to
+		 switch to TX mode, either to generate a repeated start condition, or to avoid triggering another I2C read
+		 when reading the contents of the data register. */
+	  i2c->C1 |= I2C_C1_TX_MASK;
 
-	  if(status & I2C_S_RXAK_MASK) {
-		/* We received a NACK. Generate a STOP condition and abort. */
-		goto i2c_isr_error;
-	  }
+	  /* Perform the final data register read now that it's safe to do so. */
+	  *channel->received_data++ = i2c->D;
 
-	  /* check next thing in our sequence */
-	  element = *channel->sequence;
-
-	  if(element == I2C_RESTART) {
-		/* Do we have a restart? If so, generate repeated start and make sure TX is on. */
+	  /* Do we have a repeated start? */
+	  if((channel->sequence < channel->sequence_end) && (*channel->sequence == I2C_RESTART)) {
 
 		/* Issue 6070: I2C: Repeat start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. */
 #ifdef ERRATA_1N96F_WORKAROUND
@@ -193,63 +138,137 @@ void I2C0_IRQHandler(void) {
 		i2c->F = (f_register & 0x3f); /* Zero out the MULT bits (topmost 2 bits). */
 #endif
 
-		i2c->C1 |= I2C_C1_RSTA_MASK | I2C_C1_TX_MASK; /* Generate a repeated start condition and switch to TX. */
+		i2c->C1 |= I2C_C1_RSTA_MASK; /* Generate a repeated start condition. */
 
 #ifdef ERRATA_1N96F_WORKAROUND
 		i2c->F = f_register;
 #endif
-
-		/* A restart is processed immediately, so we need to get a new element from our sequence. This is safe, because a
-		   sequence cannot end with a RESTART: there has to be something after it. */
+		/* A restart is processed immediately, so we need to get a new element from our sequence. This is safe, because
+		   a sequence cannot end with a RESTART: there has to be something after it. Note that the only thing that can
+		   come after a restart is an address write. */
+		channel->txrx = I2C_WRITING;
 		channel->sequence++;
 		element = *channel->sequence;
-		/* Note that the only thing that can come after a restart is a write. */
 		i2c->D = element;
 	  } else {
-		if(element == I2C_READ) {
-		  channel->txrx = I2C_READING;
-		  /* How many reads do we have ahead of us (not including this one)? For reads we need to know the segment length
-			 to correctly plan NACK transmissions. */
-		  channel->reads_ahead = 1;        /* We already know about one read */
-		  while(((channel->sequence + channel->reads_ahead) < channel->sequence_end) &&
-				(*(channel->sequence + channel->reads_ahead) == I2C_READ)) {
-			channel->reads_ahead++;
-		  }
-		  i2c->C1 &= ~I2C_C1_TX_MASK; /* Switch to RX mode. */
+		goto i2c_isr_stop;
+	  }
+	  break;
 
-		  if(channel->reads_ahead == 1) {
-			i2c->C1 |= I2C_C1_TXAK_MASK; /* do not ACK the final read */
-		  } else {
-			i2c->C1 &= ~(I2C_C1_TXAK_MASK);  /* ACK all but the final read */
-		  }
-		  /* Dummy read comes first, note that this is not valid data! This only triggers a read, actual data will come
-			 in the next interrupt call and overwrite this. This is why we do not increment the received_data
-			 pointer. */
-		  *channel->received_data = i2c->D;
-		  channel->reads_ahead--;
-		} else {
-		  /* Not a restart, not a read, must be a write. */
-		  i2c->D = element;
+	case 1:
+	  i2c->C1 |= I2C_C1_TXAK_MASK; /* do not ACK the final read */
+	  *channel->received_data++ = i2c->D;
+	  break;
+
+	default:
+	  *channel->received_data++ = i2c->D;
+	  break;
+	}
+
+	channel->reads_ahead--;
+
+  } else {                    /* channel->txrx == I2C_WRITING */
+	/* First, check if we are at the end of a sequence. */
+	if(channel->sequence == channel->sequence_end) {
+	  goto i2c_isr_stop;
+	}
+
+	if(status & I2C_S_RXAK_MASK) {
+	  /* We received a NACK. Generate a STOP condition and abort. */
+	  goto i2c_isr_error;
+	}
+
+	/* check next thing in our sequence */
+	element = *channel->sequence;
+
+	if(element == I2C_RESTART) {
+	  /* Do we have a restart? If so, generate repeated start and make sure TX is on. */
+
+	  /* Issue 6070: I2C: Repeat start cannot be generated if the I2Cx_F[MULT] field is set to a non-zero value. */
+#ifdef ERRATA_1N96F_WORKAROUND
+	  f_register = i2c->F;
+	  i2c->F = (f_register & 0x3f); /* Zero out the MULT bits (topmost 2 bits). */
+#endif
+
+	  i2c->C1 |= (I2C_C1_RSTA_MASK | I2C_C1_TX_MASK); /* Generate a repeated start condition and switch to TX */
+
+#ifdef ERRATA_1N96F_WORKAROUND
+	  i2c->F = f_register;
+#endif
+	  /* A restart is processed immediately, so we need to get a new element from our sequence. This is safe, because a
+		 sequence cannot end with a RESTART: there has to be something after it. */
+	  channel->sequence++;
+	  element = *channel->sequence;
+	  /* Note that the only thing that can come after a restart is a write. */
+
+	  /* In the new double-buffered I2C peripheral a delay is needed between a restart and a subsequent write to the D
+		 register. Annoyingly, no one seems to know what the delay should be. The KSDK drivers use a counter value of
+		 6, which seems too low, especially for faster clock speeds. Let's be on the safe side and use a larger
+		 value. On a MKL17Z128VFM4 at 48MHz, 19 is too low, 20 works, so choosing 22. I have no idea why the fsl_i2c.c
+		 driver works (if it does). */
+#if defined(FSL_FEATURE_I2C_HAS_DOUBLE_BUFFERING) && (FSL_FEATURE_I2C_HAS_DOUBLE_BUFFERING == 1) /* The new double-buffered I2C. */
+	  for(delay_counter=0; delay_counter < 21; delay_counter++) {
+		__asm("NOP");
+	  }
+	  while (!(i2c->S2 & I2C_S2_EMPTY_MASK)) {};
+#endif
+
+	  i2c->D = element;
+
+	} else {
+	  if(element == I2C_READ) {
+		channel->txrx = I2C_READING;
+		/* How many reads do we have ahead of us (not including this one)? For reads we need to know the segment length
+		   to correctly plan NACK transmissions. */
+		channel->reads_ahead = 1;        /* We already know about one read */
+		while(((channel->sequence + channel->reads_ahead) < channel->sequence_end) &&
+			  (*(channel->sequence + channel->reads_ahead) == I2C_READ)) {
+		  channel->reads_ahead++;
 		}
+		i2c->C1 &= ~I2C_C1_TX_MASK; /* Switch to RX mode. */
+
+		if(channel->reads_ahead == 1) {
+		  i2c->C1 |= I2C_C1_TXAK_MASK; /* do not ACK the final read */
+		} else {
+		  i2c->C1 &= ~(I2C_C1_TXAK_MASK);  /* ACK all but the final read */
+		}
+		/* Dummy read comes first, note that this is not valid data! This only triggers a read, actual data will come
+		   in the next interrupt call and overwrite this. This is why we do not increment the received_data
+		   pointer. */
+		*channel->received_data = i2c->D;
+		channel->reads_ahead--;
+	  } else {
+		/* Not a restart, not a read, must be a write. */
+		i2c->D = element;
 	  }
 	}
-
-	channel->sequence++;
-	continue;
-
-  i2c_isr_stop:
-	/* Generate STOP (set MST=0), switch to RX mode, and disable further interrupts. */
-	i2c->C1 &= ~(I2C_C1_MST_MASK | I2C_C1_IICIE_MASK | I2C_C1_TXAK_MASK);
-	channel->status = I2C_AVAILABLE;
-	/* Call the user-supplied callback function upon successful completion (if it exists). */
-	if(channel->callback_fn) {
-	  (*channel->callback_fn)(channel->user_data);
-	}
-	continue;
-
-  i2c_isr_error:
-	i2c->C1 &= ~(I2C_C1_MST_MASK | I2C_C1_IICIE_MASK); /* Generate STOP and disable further interrupts. */
-	channel->status = I2C_ERROR;
-	continue;
   }
+
+  channel->sequence++;
+  return;
+
+ i2c_isr_stop:
+  /* Generate STOP (set MST=0), switch to RX mode, and disable further interrupts. */
+  i2c->C1 &= ~(I2C_C1_MST_MASK | I2C_C1_IICIE_MASK | I2C_C1_TXAK_MASK);
+  /* Call the user-supplied callback function upon successful completion (if it exists). */
+  if(channel->callback_fn) {
+	(*channel->callback_fn)(channel->user_data);
+  }
+  channel->status = I2C_AVAILABLE;
+  return;
+
+ i2c_isr_error:
+  i2c->C1 &= ~(I2C_C1_MST_MASK | I2C_C1_IICIE_MASK); /* Generate STOP and disable further interrupts. */
+  channel->status = I2C_ERROR;
+  return;
 }
+
+void I2C0_IRQHandler(void) {
+  i2c_irq_handler(0);
+}
+
+#if(I2C_NUMBER_OF_DEVICES > 1)
+void I2C1_IRQHandler(void) {
+  i2c_irq_handler(1);
+}
+#endif

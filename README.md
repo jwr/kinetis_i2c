@@ -18,15 +18,19 @@ MIT. I believe in freedom, which means I believe in letting you do whatever you 
 
 This is not a fully-featured driver. Only master mode is implemented. Only 7-bit addressing is supported. Addressing is fully manual: it is your responsibility to shift the 7-bit I2C address to the left and add the R/W bit (actually, I see this as an advantage).
 
-There is almost no error handling. You have to check for problems yourself.
+You have to enable the clock for the I2C peripheral(s) yourself, you also have to supply the clock divider values.
+
+There is almost no error handling.
 
 # Rationale
 
-I wanted to use Kinetis microcontrollers to communicate using I2C, but could not find a decent driver. The I2C module is very simple and needs quite a bit of code. That code is in CodeWarrior if you are using Processor Expert, but I did not like the Processor Expert approach. If you don’t want to use CodeWarrior or if you want to program starting with bare metal, you are on your own.
+I wanted to use Kinetis microcontrollers to communicate using I2C, but could not find a decent driver. The I2C module is very primitive and needs quite a bit of code. All examples I could find were overly simplistic and only worked in blocking mode. Well, I care about power consumption, so I only write asynchronous interrupt-driven code.
 
-All examples I could find were overly simplistic and only worked in blocking mode. Well, I care about power consumption, so I only write asynchronous interrupt-driven code.
+I used to think that once the Kinetis SDK gets written and actually supports all devices, this code would not be necessary. But now that the SDK exists, there are still many reasons to use my code:
 
-Obviously, once the Kinetis SDK gets written and actually supports all devices, this code will not be necessary. But I needed something now.
+* The KSDK does not support all devices.
+* The driver is fairly large.
+* The driver does not support processing full write/restart/read sequences in an asynchronous way.
 
 There is another reason for publishing the code. I wrote this and then had to put my Kinetis-related projects on hold. After several months I forgot having written this driver and started searching online for one… only to finally find it using Spotlight, on my hard drive. This is what happens if you work on too many projects. To avoid this happening in the future, I now intend to publish most things I write as soon as they are reasonably complete, so that I can find them online when I need them.
 
@@ -41,22 +45,16 @@ Here's an example of performing a write and then a read with repeated start (res
 ```
   uint32_t status;
   uint16_t init_sequence[] = {0x3a, 0x0d, I2C_RESTART, 0x3b, I2C_READ};
-  uint8_t device_id = 0;		/* will contain the device id after sequence has been processed */
-  
-  enable_irq(INT_I2C0 - 16);
-	
-  SIM_SCGC4 |= SIM_SCGC4_I2C0_MASK;
-  SIM_SCGC5 |= SIM_SCGC5_PORTB_MASK;
+  uint8_t device_id = 0;		/* Will contain the device id after sequence has been processed. */
 
-  PORTB_PCR0 = PORT_PCR_MUX(0x02) | PORT_PCR_ODE_MASK;
-  PORTB_PCR1 = PORT_PCR_MUX(0x02) | PORT_PCR_ODE_MASK;
+  /* These depend on the particular chip being used. */
+  SIM->SCGC4 |= SIM_SCGC4_I2C0_MASK;
+  SIM->SCGC5 |= SIM_SCGC5_PORTB_MASK;
+  PORTB->PCR[0] = PORT_PCR_MUX(2) | PORT_PCR_ODE_MASK;
+  PORTB->PCR[1] = PORT_PCR_MUX(2) | PORT_PCR_ODE_MASK;
 
   status = i2c_init(0, 0x01, 0x20);
   status = i2c_send_sequence(0, init_sequence, 5, &device_id, my_callback, (void*)0x1234);
-
-  for(;;) {	   
-    counter++;
-  }
 ```
 
 After successful transmission, `device_id` should contain the device id of the accelerometer (check with a debugger). The endless loop is there so that you can check the result of the I2C transmission. It is performed asynchronously, so without the loop the program would terminate before the transmission ended.
@@ -69,11 +67,9 @@ Note that to successfully use I2C on Kinetis chips, you also have to:
 
 1. Enable clock gating to the I2C module.
 2. Enable clock gating to the PORT module that has the pins used for I2C.
-3. Configure the PORT PCR registers so that I2C function is selected and the pins are set to open drain.
-4. Set all I2C interrupt handlers in the interrupt vector table to the `i2c_isr()` function (if you use CodeWarrior, this is done in `Project_Settings/Startup_Code/kinetis_sysinit.c`.
-5. Enable the appropriate IRQs.
+3. Configure the PORT PCR registers so that I2C function is selected and the pins are set to open drain (necessary on some devices).
 
-Data transmission (both transmit and receive) is handled by `i2c_send_sequence()`. It sends a command/data sequence that can include restarts, writes and reads. Every transmission begins with a START, and ends with a STOP so you do not have to specify that. 
+Data transmission (both transmit and receive) is handled by `i2c_send_sequence()`. It sends a command/data sequence that can include restarts, writes and reads. Every transmission begins with a START, and ends with a STOP so you do not have to specify that.
 
 `i2c_send_sequence()` takes six parameters:
 
@@ -118,6 +114,6 @@ If you have a Kinetis L device device with the 1N96F mask, enable the `ERRATA_1N
 
 # Building and Packaging
 
-You can build the example in CodeWarrior by dropping it into a newly created bare metal project for your Kinetis chip. Place `main.c` and `i2c.c` in `Sources`, place `i2c.h` in `Project_Headers` and remember to set the appropriate interrupt vector in `Project_Settings/Startup_Code/kinetis_sysinit.c` to the `i2c_isr()` function.
+You can build the example by dropping it into a newly created bare metal or KSDK project for your Kinetis chip. Place `main.c`, `i2c.c` and `i2c.h` in `sources`.
 
 Packaging? Come on. What packaging? Just put those two files in your project. Or put the git repo in as a subproject. Or package it any way you wish — but I'm afraid I won't be able to help.
