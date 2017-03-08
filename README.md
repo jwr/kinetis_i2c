@@ -108,9 +108,15 @@ If you wonder why I consider the Bus Pirate convention useful, note that what yo
 
 # Devices
 
-I only tested this code on FRDM-K20Z board with a Kinetis MK20DX128. It should work on all Kinetis devices that have one or more I2C modules, but I haven’t tried it. If you want to use more than one module, you will have to adjust `I2C_NUMBER_OF_DEVICES`.
+This code has been used at least on the following devices:
 
-If you have a Kinetis L device device with the 1N96F mask, enable the `ERRATA_1N96F_WORKAROUND` define. It enables a workaround for issue 6070: I2C: Repeat start cannot be generated if the `I2Cx_F[MULT]` field is set to a non-zero value.
+* MK02FN128
+* MK20DX128
+* MKL03Z32
+* MKL17Z128
+* MKL25Z128
+
+If you have a Kinetis L device device with the 1N96F mask, make sure the `ERRATA_1N96F_WORKAROUND` define is enabled. This should happen automatically with newer CMSIS includes. It enables a workaround for issue 6070: I2C: Repeat start cannot be generated if the `I2Cx_F[MULT]` field is set to a non-zero value.
 
 # Building and Packaging
 
