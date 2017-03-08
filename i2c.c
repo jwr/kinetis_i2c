@@ -203,11 +203,9 @@ void i2c_irq_handler(uint32_t channel_number) {
 
 	  /* In the new double-buffered I2C peripheral a delay is needed between a restart and a subsequent write to the D
 		 register. Annoyingly, no one seems to know what the delay should be. The KSDK drivers use a counter value of
-		 6, which seems too low, especially for faster clock speeds. Let's be on the safe side and use a larger
-		 value. On a MKL17Z128VFM4 at 48MHz, 19 is too low, 20 works, so choosing 22. I have no idea why the fsl_i2c.c
-		 driver works (if it does). */
+		 6, which actually works, so I'll stick with it (verified on a MKL17Z128VFM4 chip at 48MHz). */
 #if defined(FSL_FEATURE_I2C_HAS_DOUBLE_BUFFERING) && (FSL_FEATURE_I2C_HAS_DOUBLE_BUFFERING == 1) /* The new double-buffered I2C. */
-	  for(delay_counter=0; delay_counter < 21; delay_counter++) {
+	  for(delay_counter=0; delay_counter < 6; delay_counter++) {
 		__asm("NOP");
 	  }
 	  while (!(i2c->S2 & I2C_S2_EMPTY_MASK)) {};
